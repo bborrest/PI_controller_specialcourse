@@ -1,4 +1,4 @@
-function [u,a]=LinearWaveKinematics() 
+function [u,a,eta]=LinearWaveKinematics() 
 % This function calculates the kinematics of regular waves
 % Inputs
 % f= wave frequency 
@@ -24,3 +24,4 @@ global g z_bot Hs Tp z_spar t
             a(j,i) = -w^2*H/2 * cosh(k*(z_spar(j)+h)) / sinh(k*h) * sin(w*t(i)-k*x3);    
          end
     end
+    eta = H/2 * cos(w*t-k*x3);

@@ -1,4 +1,4 @@
-function [u,a]=IrregularWaveKinematics(fvec,amp) 
+function [u,a,eta]=IrregularWaveKinematics(fvec,amp) 
 % This function calculates the velocity and acceleration at various heights
 % for a floating spar for irregular waves
 % Inputs
@@ -44,5 +44,14 @@ for iz=1:length(z_spar)
         u(iz,it) = sum(amp(2:end).*omega2.*(cosh(k(2:end)*(z_spar(iz) + h))./sinh(k(2:end)*h)).*cos(omega2*t(it) - k(2:end)*x + random(2:end)));
         a(iz,it) = sum(-omega2.^2.*amp(2:end).*(cosh(k(2:end)*(z_spar(iz) + h))./sinh(k(2:end)*h)).*sin(omega2*t(it) - k(2:end)*x + random(2:end)));
 
+    end
+end
+% calculating free surface elevation
+eta= zeros(1,length(t));
+
+for it=1:length(t)
+    for ifreq=2:length(fvec)
+        omega= 2*pi*fvec(ifreq);
+        eta(it)= eta(it) + amp(ifreq) * cos((omega)*t(it)-(k(ifreq)*x)+ (random(ifreq)));
     end
 end
