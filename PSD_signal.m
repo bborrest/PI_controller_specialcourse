@@ -1,4 +1,4 @@
-function [] = PSD_signal(t,waveFSE,windVel,signals,fHighCut,wref,analysisType,analysisCondtions,ylabelstr)
+function [] = PSD_signal(t,waveFSE,windVel,bladepitch,signals,fHighCut,wref,analysisType,analysisCondtions,ylabelstr)
 %% Description
 % This function takes a timeseries (t) and the signal response for that
 % time series as an input, and return a plot of the time  series and
@@ -56,8 +56,8 @@ if length(windVel) > 1
     if mindim==2
         windVel=windVel';
     end
-    numbersignals = numbersignals + 1;
-    start = start + 1;
+    numbersignals = numbersignals + 2;
+    start = start + 2;
 end
 %% plotting
 % plotting the wind and wave conditions
@@ -96,9 +96,11 @@ if (start - 1) > 0
             %ylabel(ylabelstr(numbersubplots))
             ylabel('PSD')
         end
-        % if the wind velocity is included, make the first/second subplot
+        % if the wind velocity is included, make the
+        % first+second/second+third subplots
         % create subplots (why numbersubplots == start is included)
-        if length(windVel) > 1 && numbersubplots == (start-1)
+        if length(windVel) > 1 && numbersubplots == start - 2
+            % wind velocity
             subplot(numbersignals,2,2*numbersubplots-1), plot(windVel(1,:),windVel(2,:),'LineWidth',1.25), grid on
             yMax = max(windVel(2,:));
             yMin = min(windVel(2,:));
@@ -113,7 +115,37 @@ if (start - 1) > 0
             % Generate frequency domain
             df = 1/(windVel(1,end)-windVel(1,timestartpos));       % Frequency resolution
             fpsd = df*(0:length(windVel)-timestartpos);  % Frequency vector starts from 0 for length t
-            signalhat = fft(windVel(2,timestartpos:end))/length(windVel(timestartpos:end,1));          % Fourier amplitudes
+            signalhat = fft(windVel(2,timestartpos:end))/length(windVel(1,timestartpos:end));          % Fourier amplitudes
+            signalhat(1) = 0;                           % Discard first value (mean)
+            signalhat(round(length(fpsd)/2):end) = 0;   % Discard all above Nyquist fr.
+            signalhat = 2*signalhat;                    % Make amplitude one-sided
+            psd = abs(signalhat).^2/2/df;               % Calculate spectrum
+            % Determine maximum x-axis for plotting
+            xMaxLim = fHighCut;
+            % Plot frequency domain
+            subplot(numbersignals,2,2*numbersubplots), plot(fpsd,psd,'LineWidth',1.25),
+            grid on
+            hold on, xlim([0 xMaxLim])
+            %ylabel(ylabelstr(numbersubplots))
+            ylabel('PSD')
+        end
+        if length(windVel) > 1 && numbersubplots == start - 1
+            % blade pitch
+            subplot(numbersignals,2,2*numbersubplots-1), plot(windVel(1,:),bladepitch,'LineWidth',1.25), grid on
+            yMax = max(bladepitch);
+            yMin = min(bladepitch);
+            % catch for constant wind
+            if yMax == yMin
+               yMax = yMax*1.2;
+               yMin = yMin*0.8;
+            end
+            ylim([yMin - 0.2*abs(yMax - yMin),yMax + 0.2*abs(yMax - yMin)]);
+            hold on
+            ylabel(ylabelstr(numbersubplots))
+            % Generate frequency domain
+            df = 1/(windVel(1,end)-windVel(1,timestartpos));       % Frequency resolution
+            fpsd = df*(0:length(windVel)-timestartpos);  % Frequency vector starts from 0 for length t
+            signalhat = fft(bladepitch(timestartpos:end))/length(windVel(1,timestartpos:end));          % Fourier amplitudes
             signalhat(1) = 0;                           % Discard first value (mean)
             signalhat(round(length(fpsd)/2):end) = 0;   % Discard all above Nyquist fr.
             signalhat = 2*signalhat;                    % Make amplitude one-sided
@@ -135,7 +167,7 @@ for numbersubplots = start:numbersignals
     subplot(numbersignals,2,2*numbersubplots-1), plot(t,signals(:,signalsIndex),'LineWidth',1.25), grid on
     yMax = max(signals(:,signalsIndex));
     yMin = min(signals(:,signalsIndex));
-    ylim([yMin - 0.2*abs(yMax - yMin),yMax + 0.2*abs(yMax - yMin)]);
+    ylim([yMin - 0.2*abs(yMax - yMin)-10^(-16),yMax + 0.2*abs(yMax - yMin) + 10^(-16)]);
     hold on
     % xlabel only if the last plot
     if numbersubplots==numbersignals
