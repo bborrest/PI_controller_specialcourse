@@ -1,6 +1,6 @@
 %% PI Controller for 6-DOF floating wind turbine model
 % Author: Joshua Forrest, s212447@student.dtu.dk
-% Date: 28/03/2022
+% Date: 14/06/2022
 % Description: This code is for tuning a PI controller to be used with the
 % IEA 15 MW turbine situated on the windcrete spar-buoy floater. The model
 % has 6 DOF, uses a single steady rotor thrust resolved at the hub, linear
@@ -30,13 +30,16 @@ freeResponse = 0;   % 1 = on, 0 = off
 Waves = 0;          % Just waves, 1 = on, 0 = off
 Wind = 1;           % Just wind, 1 = on, 0 = off
 WindWaves = 0;      % Wind + Waves, 1 = on, 0 = off
+% Switches
+controlswitch = 1;  % turn controller on (1) or off (0)
+controlvalues = 0;  % 1 = calculated values, 0 = given values
 %% Constants/Inputs
 global t dtode g
 global rho_H2O Cm_cyl CD D_spar z_spar z_bot Tp Hs
 global rho_air A_r V_rated V_hub CT_0 z_hub
 for ig=1:1
 % Time
-    Tdur = 120;                % total duration: 1000s transient + 600s response
+    Tdur = 1000;                % total duration: 1000s transient + 600s response
     dtode = 0.1;                % time-step for ode4 solver
     dt = 0.05;                  % general time step
     tode4 = 0:dtode:Tdur-dtode;
@@ -56,18 +59,14 @@ for ig=1:1
 end
 %% Controller Implementation
 global kp3 ki3 CT_10 pTpTh0 pTpOm0 pTpV pQpU0 dtheta
-% for ic = 1:1
-    % Load Turbine Data
-    load IEA_15MW_HWIND_Land_Based_hs2.mat
-    % Calculate Derivatives of CP and CT
-    del_tsr = turbine.tsrList(2) - turbine.tsrList(1);
-    del_theta = turbine.pitchList(2) - turbine.pitchList(1);
-    [dCPdTheta,dCPdTSR] = gradient(turbine.Cp,del_theta,del_tsr);
-    [dCTdTheta,dCTdTSR] = gradient(turbine.Ct,del_theta,del_tsr);
+for ic = 1:1
+    dtheta = [0];
+    % Constants
+    Idr = 3.14655*10^8; % Drivetrain (Rotor + Generator) Inertia [kgm^2]
+    theta_k = 11.53355;     % thetak for controller gain [deg]
     % Load and calculate operating points
     op0 = readmatrix('operation_equinor.txt');
     CTlist = 1000*op0(:,5)./(0.5*rho_air*A_r.*op0(:,1).^2);
-    dtheta = [0];
     % create tsr-cp table for pQpU0
     op0_tsrCP = [op0(:,3)*R_r*2*pi/60./op0(:,1), op0(:,4)*10^3./(0.5*rho_air*A_r*op0(:,1).^3)];
     % determine operation values of tsr and pitch for given conditions
@@ -81,34 +80,64 @@ global kp3 ki3 CT_10 pTpTh0 pTpOm0 pTpV pQpU0 dtheta
     % calculate CT_10, or operating CT***
     %CT_10 =interp1(turbine.pitchList,interp1(turbine.tsrList,turbine.Ct,tsrOP),pitchOP);from the table of tsr-pitch
     CT_10 = interp1(op0(:,1),CTlist,V_10);  % from Equinor operating table
-    % calculate operating point rates of change for CP, CT
-    dCPdTh0 = interp1(turbine.tsrList,interp1(turbine.pitchList,dCPdTheta',pitchOP),tsrOP);
-    dCPdTSR0 = interp1(turbine.tsrList,interp1(turbine.pitchList,dCPdTSR',pitchOP),tsrOP);
-    dCTdTh0 = interp1(turbine.tsrList,interp1(turbine.pitchList,dCTdTheta',pitchOP),tsrOP);
-    dCTdTSR0 = interp1(turbine.tsrList,interp1(turbine.pitchList,dCTdTSR',pitchOP),tsrOP);
-    % Calculate Operating Partial Derivatives
-    pQpTh0 = 0.5*rho_air*A_r*V_10^3*dCPdTh0/(tsrOP*V_10/R_r)*180/pi;      % variation of aerodynamic torque with pitch angle, linearized around 0 degree pitch [N*m/deg]
-    pTpTh0 = 0.5*rho_air*A_r*V_10^2*dCTdTh0*180/pi;                        % variation of the thrust with pitch, linearized around 0 degree pitch [N/deg]
-    pQpOm0 = 0.5*rho_air*A_r*V_10^3*(dCPdTSR0*R_r/V_10)/(tsrOP*V_10/R_r);      % variation of aerodynamic torque with rotor speed, linearized around 0 degree pitch [N*m*s/deg]
-    pQpOm0test = (0.5*rho_air*A_r*V_10^3*dCPdTSR0/(tsrOP*V_10/R_r) - 0.5*rho_air*A_r*V_10^3*CP_OP*R_r/(V_10*tsrOP^2))*R_r/V_10;
-    pTpOm0 = 0.5*rho_air*A_r*V_10^2*(dCTdTSR0*R_r/V_10);                       % variation of the thrust with rotor speed [N/rad]
-    pQpU0 = (-tsrOP/V_10)*pQpOm0*(V_10/R_r);        % variation of generator torque with rotor speed , linearized around 0 degree pitch [N*m*s/rad]
-    % Calculating change in T for change in wind speed
-    pTpV = 0.5*rho_air*A_r*V_10^2*(-dCTdTSR0*tsrOP/V_10);
-    % Constants
-    eta_gen = 0.965;    % generator efficiency
-    Ng = 1;             % generator gearbox ratio (1 for direct drive)
-    Idr = 3.14655*10^8; % Drivetrain (Rotor + Generator) Inertia [kgm^2]
-    % Region 1, below rated wind speed (Optimal Torque Control)
-    K1 = (eta_gen*rho_air*A_r*R_r^3*CP_opt)/(2*Ng*TSR_opt);
-    % Region 3, above rated wind speed (Blade Pitch for Pitch Stability Control)
-    kp3 = ctrl_damping*ctrl_omega*(2*Idr)/(-pQpTh0);   % possibly some small error
-    ki3 = ctrl_omega^2*(Idr)/(-pQpTh0);
-    kp3 = 1.22795;
-    ki3 = 0.23377;
-    kp3 = 0;
-    ki3 = 0;
-% end
+    if controlvalues == 1
+        % self-calculated
+        % Load Turbine Data
+        load IEA_15MW_HWIND_Land_Based_hs2.mat
+        % Calculate Derivatives of CP and CT
+        del_tsr = turbine.tsrList(2) - turbine.tsrList(1);
+        del_theta = turbine.pitchList(2) - turbine.pitchList(1);
+        [dCPdTheta,dCPdTSR] = gradient(turbine.Cp,del_theta,del_tsr);
+        [dCTdTheta,dCTdTSR] = gradient(turbine.Ct,del_theta,del_tsr);
+        % calculate operating point rates of change for CP, CT
+        dCPdTh0 = interp1(turbine.tsrList,interp1(turbine.pitchList,dCPdTheta',pitchOP),tsrOP);
+        dCPdTSR0 = interp1(turbine.tsrList,interp1(turbine.pitchList,dCPdTSR',pitchOP),tsrOP);
+        dCTdTh0 = interp1(turbine.tsrList,interp1(turbine.pitchList,dCTdTheta',pitchOP),tsrOP);
+        dCTdTSR0 = interp1(turbine.tsrList,interp1(turbine.pitchList,dCTdTSR',pitchOP),tsrOP);
+        % Calculate Operating Partial Derivatives
+        pQpTh0 = 0.5*rho_air*A_r*V_10^3*dCPdTh0/(tsrOP*V_10/R_r);      % variation of aerodynamic torque with pitch angle, linearized around 0 degree pitch [N*m/deg]
+        pTpTh0 = 0.5*rho_air*A_r*V_10^2*dCTdTh0;                        % variation of the thrust with pitch, linearized around 0 degree pitch [N/deg]
+        pQpOm0 = 0.5*rho_air*A_r*V_10^3*(dCPdTSR0*R_r/V_10)/(tsrOP*V_10/R_r);      % variation of aerodynamic torque with rotor speed, linearized around 0 degree pitch [N*m*s/deg]
+        pQpOm0test = (0.5*rho_air*A_r*V_10^3*dCPdTSR0/(tsrOP*V_10/R_r) - 0.5*rho_air*A_r*V_10^3*CP_OP*R_r/(V_10*tsrOP^2))*R_r/V_10;
+        pTpOm0 = 0.5*rho_air*A_r*V_10^2*(dCTdTSR0*R_r/V_10);                       % variation of the thrust with rotor speed [N/rad]
+        pQpU0 = (-tsrOP/V_10)*pQpOm0*(V_10/R_r);        % variation of generator torque with rotor speed , linearized around 0 degree pitch [N*m*s/rad]
+        % Calculating change in T for change in wind speed
+        pTpV = 0.5*rho_air*A_r*V_10^2*(-dCTdTSR0*tsrOP/V_10);
+        % Region 3, above rated wind speed (Blade Pitch for Pitch Stability Control)
+        if controlswitch == 1
+            kp3 = ctrl_damping*ctrl_omega*(2*Idr)/(-pQpTh0);   % possibly some small error
+            ki3 = ctrl_omega^2*(Idr)/(-pQpTh0);
+            Gk = (1 + pitchOP/theta_k)^-1;
+            kp3 = Gk*kp3;
+            ki3 = Gk*ki3;
+        else
+            kp3 = 0;
+            ki3 = 0;
+        end
+    else
+        % given values
+        pQpTh0 = -4764.70125*10^3;
+        pQpOm0 = -58981.31987*10^3;
+        pTpTh0 = -2.5104*10^5;
+        pTpOm0 = -1.4571*10^6;
+        pQpU0 = 5.7223*10^6;
+        pTpV = 2.3354*10^5;
+        if controlswitch == 1
+            % with gain scheduling
+            kp3 = 1.22795;      % for 12 m/s wind
+            ki3 = 0.23377;
+            Gk = (1 + pitchOP/theta_k)^-1;
+            kp3 = Gk*kp3;
+            ki3 = Gk*ki3;
+            adjustment = 1.0;
+            kp3 = adjustment*kp3;
+            ki3 = adjustment*ki3;
+        else
+            kp3 = 0;
+            ki3 = 0;
+        end
+    end
+end
 %% 6DOF Model Formation
 for im = 1:1
     % Mass Matrix
@@ -142,12 +171,22 @@ for ic = 1:1
     M(7,7) = Idr;
     A(7,7) = 0.00;     % accounted for in M
     B(7,7) = - (kp3*pQpTh0 + pQpOm0);
+    B(7,1) = pQpU0;
+    B(7,5) = pQpU0;
     C(7,7) = -ki3*pQpTh0;
 end
 %% Natural Frequencies
 for iwf = 1:1
     [V,omega] = eig(C*(M+A)^-1);
     omega = diag(omega).^0.5/(2*pi);
+    As = [zeros(size(A)), ones(size(A)); -(M+A)\C, -(M+A)\B];
+    Bs = [zeros(size(A));inv(M+A)];
+    Cs = [ones(1,length(A)),zeros(1,length(A))];
+    Ds = zeros(1,length(A));
+    sys = ss(As,Bs,Cs,Ds);
+    [wn,zeta,poles] = damp(sys);
+    zeta(8:14)
+    pzmap(sys)
     wref = [0.01221, 0.03052, 0.02441, 0.09155];
 end
 %% System Unforced Response
@@ -279,13 +318,13 @@ if Wind == 1
         % NEED TO ADD: rotor speed and blade pitch plots
         if Kaimal == 1
             analysisType = "Turbulent wind";
-            ylabelstr = ["V_{hub} [m/s]","Surge [m]","Sway [m]","Heave [m]","Roll [deg]","Pitch [deg]","Yaw [deg]"];
-            PSD_signal(tode4(10001:end),1,[t(20001:end);V_hub(20001:end)],[Y_wind(10001:end,1:3),Y_wind(10001:end,4:6)*180/pi],fHighCut,[wref(1),wref(1),wref(2),wref(3),wref(3),wref(4)],analysisType,strcat("V_{10} = ",num2str(V_10),"m/s, TI = ",num2str(TI*100),"%"),ylabelstr)        
+            ylabelstr = ["V_{hub} [m/s]","Pitch [deg]","Surge [m]","Sway [m]","Heave [m]","Roll [deg]","Pitch [deg]","Yaw [deg]","Rotor speed [rad/s]"];
+            PSD_signal(tode4,1,[t;V_hub],dtheta + pitchOP,[Y_wind(:,1:3),Y_wind(:,4:6)*180/pi,Y_wind(:,14) + tsrOP*V_10/R_r],fHighCut,[wref(1),wref(1),wref(2),wref(3),wref(3),wref(4),0.03],analysisType,strcat("V_{10} = ",num2str(V_10),"m/s, TI = ",num2str(TI*100),"%"),ylabelstr)        
         else
             analysisType = "Steady wind";
-            ylabelstr = ["V_{hub} [m/s]","Pitch deviation [deg]","Surge [m]","Sway [m]","Heave [m]","Roll [deg]","Pitch [deg]","Yaw [deg]","Rotor deviation [rad/s]"];
+            ylabelstr = ["V_{hub} [m/s]","Pitch [deg]","Surge [m]","Sway [m]","Heave [m]","Roll [deg]","Pitch [deg]","Yaw [deg]","Rotor speed [rad/s]"];
 %             PSD_signal(tode4(10001:end),1,[t(20001:end);V_hub(20001:end)],[Y_wind(10001:end,1:3),Y_wind(10001:end,4:6)*180/pi],fHighCut,[wref(1),wref(1),wref(2),wref(3),wref(3),wref(4)],analysisType,strcat("V_{10} = ",num2str(V_10),"m/s"),ylabelstr)        
-            PSD_signal(tode4,1,[t;V_hub],pitchOP + dtheta,[Y_wind(:,1:3),Y_wind(:,4:6)*180/pi,Y_wind(:,14) + tsrOP*V_10/R_r],fHighCut,[wref(1),wref(1),wref(2),wref(3),wref(3),wref(4),0.03],analysisType,strcat("V_{10} = ",num2str(V_10),"m/s"),ylabelstr)        
+            PSD_signal(tode4,1,[t;V_hub],dtheta + pitchOP,[Y_wind(:,1:3),Y_wind(:,4:6)*180/pi,Y_wind(:,14) + tsrOP*V_10/R_r],fHighCut,[wref(1),wref(1),wref(2),wref(3),wref(3),wref(4),0.03],analysisType,strcat("V_{10} = ",num2str(V_10),"m/s"),ylabelstr)        
         end
     end
 end
@@ -343,3 +382,15 @@ if WindWaves == 1
        
     end
 end
+%% Trouble Shooting
+global Thrust
+figure
+plot(t,Thrust/10^3)
+xlabel('Time [s]')
+ylabel('Thrust [kN]')
+
+figure
+plot(t,dtheta)
+xlabel('Time [s]')
+ylabel('\Delta\theta')
+xlim([0 100])

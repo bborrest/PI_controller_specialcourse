@@ -19,7 +19,7 @@ function dq = dqdtsparbuoy(tode4,q,M,B,C,forcing)
 % forcing vector with Force in 1-3 and torque in 4-6; q is a 4x1 vector that is
 % split into two 2x1 vectors for solving the system. The return, dq, is 4x1
 %% Implementation
-global t z_hub
+global t z_hub Thrust
 % Find the proper time for forcing
 [~ ,index]= min(abs(tode4-t));
 % Calculate forcing
@@ -34,12 +34,19 @@ elseif forcing == 2
 elseif forcing == 3
     % wind only forcing (with PI controller)
     qhub = q(8)+z_hub*q(12);                            % dxdt of the hub
+    if abs(qhub) > 1000
+        qhub = 0;
+    end
     F = F_wind_Region3(qhub,q(7),q(14),index);
 elseif forcing == 4
     % hydro plus wind forcing with a PI controller implemented
     qhub = q(8)+z_hub*q(12);                            % dxdt of the hub
+    if abs(qhub) > 1000
+        qhub = 0;
+    end
     [Windforcing] = F_wind_Region3(qhub,q(7),q(14),index);    % time-delay controller
     F = hydroforcing(index,q(7),q(8),q(10),q(11)) + Windforcing;                        % hydro plus steady wind forcing
 end
 dq8_14 = (M)\(F - B*q(8:14) - C*q(1:7));        % calculate qdot 8 to 14
 dq=[q(8:14);dq8_14];             % return qdot vector 14x1
+Thrust(index+1) = F(1);
