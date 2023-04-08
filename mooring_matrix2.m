@@ -1,4 +1,4 @@
-function [C_M] = mooring_matrix2(X,hmoor,water_depth,K66)
+function [C_M] = mooring_matrix2(X,hmoor,wmoor,L,Rc,Rs,water_depth,K66)
 %% Mooring stiffness calculations
 % This function calculates the mooring stiffness matrix based on catenary
 % equations for a stiff catenary line resting on the seabed. For the 
@@ -18,14 +18,15 @@ function [C_M] = mooring_matrix2(X,hmoor,water_depth,K66)
 % with x4, x5, x6 in radians!!
 % K66, manually adjusted yaw-yaw stiffness parameter for split fairleads
 %% Mooring data
-global rho_H2O
-ld = 39.1;                                      % delta lines projected length (43.9) (39.1)
-hd = 3.1104;                                      % delta lines projected height of connection adjusted, positive down (2.48) (3.1104)
-Zm = (hmoor - hd) - water_depth;                % mooring fairlead attachment Z-coordinate in body coordinates [m]
-L = 565 + ld;                                   % line length
-Rc = 600;                                       % anchor radius [m]
-Rs = 9.3;                                       % sparbuoy radius at fairlead connection
-wmoor = 561.25*(1 - (rho_H2O*pi*0.08^2)/561.25)*9.81;   % N/m
+rho_H2O = 1020;                         % salt water density
+%ld = 39.1;                                      % delta lines projected length (43.9) (39.1)
+% hd = 3.1104;                                      % delta lines projected height of connection adjusted, positive down (2.48) (3.1104)
+% Zm = (hmoor - hd) - water_depth;                % mooring fairlead attachment Z-coordinate in body coordinates [m]
+Zm = (hmoor) - water_depth;                % mooring fairlead attachment Z-coordinate in body coordinates [m]
+%L = 565 + ld;                                   % line length
+%Rc = 600;                                       % anchor radius [m]
+%Rs = 9.3;                                       % sparbuoy radius at fairlead connection
+%wmoor = 561.25*(1 - (rho_H2O*pi*0.08^2)/561.25)*9.81;   % N/m
 %% Coordinate Geometry
 % fix below for H,V,l being 3x1
 n = 3;          % number of mooring lines

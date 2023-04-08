@@ -16,12 +16,12 @@ clc
 %% Control Conditions
 global V_10
 V_10 = 16;      % V10 min value
-Kaimal = 0; 	% Kaimal Wind Spectrum (1) or Constant Wind (0)
+Kaimal = 1; 	% Kaimal Wind Spectrum (1) or Constant Wind (0)
 Jonswap = 0;    % Jonswap Wave Distribution (1) or Still Water (0) or Regular Waves (2)
 YawAngle = 0;   % Wind yaw angle
 WaveAngle = 0;  % Wave angle relative to the rotor [degrees]
 % IC for Decay [m,m,m,rad,rad,rad,controller,m/s,m/s,m/s,rad/s,rad/s,rad/s,dcontroller]
-q0 = [00; 00; 0; 0.0; 0.0; 0.0; 0.0; 0; 0; 0; 0; 0; 0; 0];       % 14x1 (7 x, 7 dx, 6 rigid-body-DOF + azimuth) [m, rad, ~]
+q0 = [00; 00; 0; 0.0; 10*pi/180; 0.0; 0.0; 0; 0; 0; 0; 0; 0; 0];       % 14x1 (7 x, 7 dx, 6 rigid-body-DOF + azimuth) [m, rad, ~]
 % Controller Tuning
 ctrl_damping = 0.7;     % 70% critical is the report value
 ctrl_omega = 0.1885;    % 0.03 Hz is the report value [rad/s]
@@ -33,6 +33,9 @@ WindWaves = 0;      % Wind + Waves, 1 = on, 0 = off
 % Switches
 controlswitch = 1;  % turn controller on (1) or off (0)
 controlvalues = 0;  % 1 = calculated values, 0 = given values
+% Plotting Range
+start1 = 16000;
+start4 = 8000;%(should be about 1/2 of start1)
 %% Constants/Inputs
 global t dtode g
 global rho_H2O Cm_cyl CD D_spar z_spar z_bot Tp Hs
@@ -116,12 +119,12 @@ for ic = 1:1
         end
     else
         % given values
-        pQpTh0 = -4764.70125*10^3;
+        pQpTh0 = -4764.70125*10^3*(180/pi);
         pQpOm0 = -58981.31987*10^3;
-        pTpTh0 = -2.5104*10^5;
+        pTpTh0 = -2.5104*10^5*(180/pi);
         pTpOm0 = -1.4571*10^6;
         pQpU0 = 5.7223*10^6;
-        pTpV = 2.3354*10^5;
+        pTpV = -2.3354*10^5;
         if controlswitch == 1
             % with gain scheduling
             kp3 = 1.22795;      % for 12 m/s wind
@@ -162,30 +165,50 @@ for im = 1:1
     B(1,1) = 7.0*10^5;
     B(2,2) = B(1,1);
     B(3,3) = 1.23*10^6;
-    B(4,4) = 0;
+    B(4,4) = B(1,1)*9000;
     B(5,5) = B(4,4);
     B(6,6) = 8.98*10^7;
 end
-%% Add Controller to System, 7 DOF
+%% Add Controller and Linearize System, 7 DOF
 for ic = 1:1
-    M(7,7) = Idr;
-    A(7,7) = 0.00;     % accounted for in M
-    B(7,7) = - (kp3*pQpTh0 + pQpOm0);
-    B(7,1) = pQpU0;
-    B(7,5) = pQpU0;
-    C(7,7) = -ki3*pQpTh0;
+    if Wind == 1
+        % Controller
+        M(7,7) = Idr;
+        A(7,7) = 0.00;     % accounted for in M
+        B(7,7) = - (kp3*pQpTh0 + pQpOm0);
+        C(7,7) = - ki3*pQpTh0;
+        % Aero Forces Linearization
+        B(1,1) = B(1,1) + pTpV;
+        B(1,5) = B(1,5) + pTpV*z_hub;
+        B(1,7) = B(1,7) - (pTpOm0 + kp3*pTpTh0);
+        B(5,1) = B(5,1) + pTpV*z_hub;
+        B(5,5) = B(5,5) + pTpV*z_hub*z_hub;
+        B(5,7) = B(5,7) - (pTpOm0 + kp3*pTpTh0)*z_hub;
+        C(1,7) = -ki3*pTpTh0;
+        C(5,7) = -ki3*pTpTh0*z_hub;
+    %     B(7,1) = pQpU0;
+    %     B(7,5) = pQpU0;
+    %     B(5,5) = -20^10;
+    else
+        M(7,7) = 10^-4;
+        A(7,7) = 10^-4;
+        B(7,7) = 10^-4;
+        C(7,7) = 10^-4;
+    end
 end
 %% Natural Frequencies
 for iwf = 1:1
     [V,omega] = eig(C*(M+A)^-1);
-    omega = diag(omega).^0.5/(2*pi);
-    As = [zeros(size(A)), ones(size(A)); -(M+A)\C, -(M+A)\B];
+    omegaHz = diag(omega).^0.5/(2*pi);
+    omega = diag(omega).^0.5;
+    As = [zeros(size(A)), eye(size(A)); -(M+A)\C, -(M+A)\B];
     Bs = [zeros(size(A));inv(M+A)];
-    Cs = [ones(1,length(A)),zeros(1,length(A))];
-    Ds = zeros(1,length(A));
+    Cs = [eye(size(A)),zeros(size(A));zeros(size(A)),zeros(size(A))];
+    Ds = zeros(length(Cs),length(A));
     sys = ss(As,Bs,Cs,Ds);
     [wn,zeta,poles] = damp(sys);
-    zeta(8:14)
+    wd = wn.*sqrt(1 - zeta.^2);
+    figure
     pzmap(sys)
     wref = [0.01221, 0.03052, 0.02441, 0.09155];
 end
@@ -195,19 +218,19 @@ if freeResponse == 1
     for id = 1:1
         Y_decay = ode4(@dqdtsparbuoy,tode4,q0,M+A,B,C,1);
         % time series and frequency domain plotting
-        figure
+        figure      
         if q0(1) ~= 0
             ylabelstr = ["Surge [m]","Pitch [deg]"];
-            PSD_signal(tode4,1,1,[Y_decay(:,1),Y_decay(:,5)*180/pi],fHighCut,[wref(1),wref(3)],"No forcing",strcat(num2str(q0(1))," m surge displacement"),ylabelstr)
+            PSD_signal(tode4,1,1,1,[Y_decay(:,1),Y_decay(:,5)*180/pi],fHighCut,[wref(1),wref(3)],"No forcing",strcat(num2str(q0(1))," m surge displacement"),ylabelstr)
         elseif q0(2) ~= 0
             ylabelstr = ["Sway [m]","Roll [deg]"];
-            PSD_signal(tode4,1,1,[Y_decay(:,2),Y_decay(:,4)*180/pi],fHighCut,[wref(1),wref(3)],"No forcing",strcat(num2str(q0(2))," m sway displacement"),ylabelstr)
+            PSD_signal(tode4,1,1,1,[Y_decay(:,2),Y_decay(:,4)*180/pi],fHighCut,[wref(1),wref(3)],"No forcing",strcat(num2str(q0(2))," m sway displacement"),ylabelstr)
         elseif q0(4) ~= 0
             ylabelstr = ["Sway [m]","Roll [deg]"];
-            PSD_signal(tode4,1,1,[Y_decay(:,2),Y_decay(:,4)*180/pi],fHighCut,[wref(1),wref(3)],"No forcing",strcat(num2str(q0(4)*180/pi)," deg roll displacement"),ylabelstr)
+            PSD_signal(tode4,1,1,1,[Y_decay(:,2),Y_decay(:,4)*180/pi],fHighCut,[wref(1),wref(3)],"No forcing",strcat(num2str(q0(4)*180/pi)," deg roll displacement"),ylabelstr)
         elseif q0(5) ~= 0
             ylabelstr = ["Surge [m]","Pitch [deg]"];
-            PSD_signal(tode4,1,1,[Y_decay(:,1),Y_decay(:,5)*180/pi],fHighCut,[wref(1),wref(3)],"No forcing",strcat(num2str(q0(5)*180/pi)," deg pitch displacement"),ylabelstr)
+            PSD_signal(tode4,1,1,1,[Y_decay(:,1),Y_decay(:,5)*180/pi],fHighCut,[wref(1),wref(3)],"No forcing",strcat(num2str(q0(5)*180/pi)," deg pitch displacement"),ylabelstr)
         end
         % plot everything
 %         ylabelstr = ["Surge [m]","Sway [m]","Heave [m]","Roll [deg]","Pitch [deg]","Yaw [deg]"];
@@ -285,20 +308,21 @@ if Waves == 1
         if Jonswap == 1 || Jonswap == 2
             analysisType = ["Irregular linear waves","Regular linear waves"];
             ylabelstr = ["\eta [m]","Surge [m]","Sway [m]","Heave [m]","Roll [deg]","Pitch [deg]","Yaw [deg]"];
-            PSD_signal(tode4(10001:end),[t(20001:end);eta(20001:end)],1,[Y_waves(10001:end,1:3),Y_waves(10001:end,4:6)*180/pi],fHighCut,[wref(1),wref(1),wref(2),wref(3),wref(3),wref(4)],analysisType(Jonswap),strcat("H_s = 2m, T_p = 6s, ",num2str(WaveAngle)," degree wave angle"),ylabelstr)
+            PSD_signal(tode4(start4:end),[t(start1:end);eta(start1:end)],1,1,[Y_waves(start4:end,1:3),Y_waves(start4:end,4:6)*180/pi],...
+                fHighCut,[wref(1),wref(1),wref(2),wref(3),wref(3),wref(4)],analysisType(Jonswap),strcat("H_s = 2m, T_p = 6s, ",num2str(WaveAngle)," degree wave angle"),ylabelstr)
         else
             if q0(1) ~= 0
                 ylabelstr = ["Surge [m]","Pitch [deg]"];
-                PSD_signal(tode4,1,1,[Y_waves(:,1),Y_waves(:,5)*180/pi],fHighCut,[wref(1),wref(3)],"Still water",strcat(num2str(q0(1))," m surge displacement"),ylabelstr)
+                PSD_signal(tode4(start4:end),1,1,[Y_waves(start4:end,1),Y_waves(start4:end,5)*180/pi],fHighCut,[wref(1),wref(3)],"Still water",strcat(num2str(q0(1))," m surge displacement"),ylabelstr)
             elseif q0(2) ~= 0
                 ylabelstr = ["Sway [m]","Roll [deg]"];
-                PSD_signal(tode4,1,1,[Y_waves(:,2),Y_waves(:,4)*180/pi],fHighCut,[wref(1),wref(3)],"Still water",strcat(num2str(q0(2))," m sway displacement"),ylabelstr)
+                PSD_signal(tode4(start4:end),1,1,[Y_waves(start4:end,2),Y_waves(start4:end,4)*180/pi],fHighCut,[wref(1),wref(3)],"Still water",strcat(num2str(q0(2))," m sway displacement"),ylabelstr)
             elseif q0(4) ~= 0
                 ylabelstr = ["Sway [m]","Roll [deg]"];
-                PSD_signal(tode4,1,1,[Y_waves(:,2),Y_waves(:,4)*180/pi],fHighCut,[wref(1),wref(3)],"Still water",strcat(num2str(q0(4))," deg roll displacement"),ylabelstr)
+                PSD_signal(tode4(start4:end),1,1,[Y_waves(start4:end,2),Y_waves(start4:end,4)*180/pi],fHighCut,[wref(1),wref(3)],"Still water",strcat(num2str(q0(4))," deg roll displacement"),ylabelstr)
             elseif q0(5) ~= 0
                 ylabelstr = ["Surge [m]","Pitch [deg]"];
-                PSD_signal(tode4,1,1,[Y_waves(:,1),Y_waves(:,5)*180/pi],fHighCut,[wref(1),wref(3)],"Still water",strcat(num2str(q0(5))," deg pitch displacement"),ylabelstr)
+                PSD_signal(tode4(start4:end),1,1,[Y_waves(start4:end,1),Y_waves(start4:end,5)*180/pi],fHighCut,[wref(1),wref(3)],"Still water",strcat(num2str(q0(5))," deg pitch displacement"),ylabelstr)
             end
         end
     end
@@ -315,16 +339,17 @@ if Wind == 1
         Y_wind = ode4(@dqdtsparbuoy,tode4,q0,M+A,B,C,3);
         % time series and frequency domain plotting
         figure
-        % NEED TO ADD: rotor speed and blade pitch plots
         if Kaimal == 1
             analysisType = "Turbulent wind";
             ylabelstr = ["V_{hub} [m/s]","Pitch [deg]","Surge [m]","Sway [m]","Heave [m]","Roll [deg]","Pitch [deg]","Yaw [deg]","Rotor speed [rad/s]"];
-            PSD_signal(tode4,1,[t;V_hub],dtheta + pitchOP,[Y_wind(:,1:3),Y_wind(:,4:6)*180/pi,Y_wind(:,14) + tsrOP*V_10/R_r],fHighCut,[wref(1),wref(1),wref(2),wref(3),wref(3),wref(4),0.03],analysisType,strcat("V_{10} = ",num2str(V_10),"m/s, TI = ",num2str(TI*100),"%"),ylabelstr)        
+            PSD_signal(tode4(start4:end),1,[t(start1:end);V_hub(start1:end)],dtheta(start1:end) + pitchOP,[Y_wind(start4:end,1:3),Y_wind(start4:end,4:6)*180/pi,Y_wind(start4:end,14) + tsrOP*V_10/R_r],...
+                fHighCut,[wref(1),wref(1),wref(2),wref(3),wref(3),wref(4),0.03],analysisType,strcat("V_{10} = ",num2str(V_10),"m/s, TI = ",num2str(TI*100),"%"),ylabelstr)        
         else
             analysisType = "Steady wind";
             ylabelstr = ["V_{hub} [m/s]","Pitch [deg]","Surge [m]","Sway [m]","Heave [m]","Roll [deg]","Pitch [deg]","Yaw [deg]","Rotor speed [rad/s]"];
 %             PSD_signal(tode4(10001:end),1,[t(20001:end);V_hub(20001:end)],[Y_wind(10001:end,1:3),Y_wind(10001:end,4:6)*180/pi],fHighCut,[wref(1),wref(1),wref(2),wref(3),wref(3),wref(4)],analysisType,strcat("V_{10} = ",num2str(V_10),"m/s"),ylabelstr)        
-            PSD_signal(tode4,1,[t;V_hub],dtheta + pitchOP,[Y_wind(:,1:3),Y_wind(:,4:6)*180/pi,Y_wind(:,14) + tsrOP*V_10/R_r],fHighCut,[wref(1),wref(1),wref(2),wref(3),wref(3),wref(4),0.03],analysisType,strcat("V_{10} = ",num2str(V_10),"m/s"),ylabelstr)        
+            PSD_signal(tode4(start4:end),1,[t(start1:end);V_hub(start1:end)],dtheta(start1:end) + pitchOP,[Y_wind(start4:end,1:3),Y_wind(start4:end,4:6)*180/pi,Y_wind(start4:end,14) + tsrOP*V_10/R_r],...
+                fHighCut,[wref(1),wref(1),wref(2),wref(3),wref(3),wref(4),0.03],analysisType,strcat("V_{10} = ",num2str(V_10),"m/s"),ylabelstr)        
         end
     end
 end
@@ -368,17 +393,21 @@ if WindWaves == 1
     % forced response
     Y_windwaves = ode4(@dqdtsparbuoy,tode4,q0,M+A,B,C,4);
     % time series and frequency domain plotting
-    % INCLUDE rotor speed and blade pitch
     if Kaimal == 1
         analysisType = ["Still water and Turbulent wind","Irregular linear waves and Turbulent wind","Regular linear waves and Turbulent wind"];
-        analysisConditions = [strcat("V_{10} = ",num2str(V_10)," m/s, TI = ",num2str(TI*100),"%"),strcat("H_s = 2m, T_p = 6s, ",num2str(WaveAngle)," degree wave angle; V_{10} = ",num2str(V_10)," m/s, TI = ",num2str(TI*100),"%"),strcat("H_s = 2m, T_p = 6s, ",num2str(WaveAngle)," degree wave angle; V_{10} = ",num2str(V_10)," m/s, TI = ",num2str(TI*100),"%")];
+        analysisConditions = [strcat("V_{10} = ",num2str(V_10)," m/s, TI = ",num2str(TI*100),"%"),...
+            strcat("H_s = 2m, T_p = 6s, ",num2str(WaveAngle)," degree wave angle; V_{10} = ",num2str(V_10)," m/s, TI = ",num2str(TI*100),"%"),...
+            strcat("H_s = 2m, T_p = 6s, ",num2str(WaveAngle)," degree wave angle; V_{10} = ",num2str(V_10)," m/s, TI = ",num2str(TI*100),"%")];
     else
         analysisType = ["Still water and Steady wind","Irregular linear waves and Steady wind","Regular linear waves and Steady wind"];
-        analysisConditions = [strcat("V_{10} = ",num2str(V_10)),strcat("H_s = 2m, T_p = 6s, ",num2str(WaveAngle)," degree wave angle; V_{10} = ",num2str(V_10)," m/s"),strcat("H_s = 2m, T_p = 6s, ",num2str(WaveAngle)," degree wave angle; V_{10} = ",num2str(V_10)," m/s")];
+        analysisConditions = [strcat("V_{10} = ",num2str(V_10)),...
+            strcat("H_s = 2m, T_p = 6s, ",num2str(WaveAngle)," degree wave angle; V_{10} = ",num2str(V_10)," m/s"),...
+            strcat("H_s = 2m, T_p = 6s, ",num2str(WaveAngle)," degree wave angle; V_{10} = ",num2str(V_10)," m/s")];
     end
     ylabelstr = ["\eta [m]","V_{10} [m/s]","Surge [m]","Sway [m]","Heave [m]","Roll [deg]","Pitch [deg]","Yaw [deg]"];
     figure
-    PSD_signal(tode4(10001:end),[t(20001:end);eta(20001:end)],[t(20001:end);V_hub(20001:end)],[Y_windwaves(10001:end,1:3),Y_windwaves(10001:end,4:6)*180/pi],fHighCut,[wref(1),wref(1),wref(2),wref(3),wref(3),wref(4)],analysisType(Jonswap+1),analysisConditions(Jonswap+1),ylabelstr)
+    PSD_signal(tode4(start4:end),[t(start1:end);eta(start1:end)],[t(start1:end);V_hub(start1:end)],dtheta(start1:end) + pitchOP,[Y_windwaves(start4:end,1:3),Y_windwaves(start4:end,4:6)*180/pi],...
+        fHighCut,[wref(1),wref(1),wref(2),wref(3),wref(3),wref(4),0.03],analysisType(Jonswap+1),analysisConditions(Jonswap+1),ylabelstr)
        
     end
 end
@@ -392,5 +421,5 @@ ylabel('Thrust [kN]')
 figure
 plot(t,dtheta)
 xlabel('Time [s]')
-ylabel('\Delta\theta')
-xlim([0 100])
+ylabel('\Delta\theta [deg]')
+xlim([0 1000])

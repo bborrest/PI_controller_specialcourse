@@ -33,7 +33,7 @@ for i=1:length(z_spar)
     A = D^2*pi/4;
     % forces and stuff
     dfsurge = rho_H2O*((Cm_cyl+1)*A*udot(i,t_index) + 0.5*CD*D_spar*(u(i,t_index)-q8-z_spar(i)*q12)*abs(u(i,t_index)-q8-z_spar(i)*q12));
-    dfsway = rho_H2O*((Cm_cyl+1)*A*vdot(i,t_index) + 0.5*CD*D_spar*(v(i,t_index)-q9-z_spar(i)*q11)*abs(v(i,t_index)-q9-z_spar(i)*q12));
+    dfsway = rho_H2O*((Cm_cyl+1)*A*vdot(i,t_index) + 0.5*CD*D_spar*(v(i,t_index)-q9-z_spar(i)*q11)*abs(v(i,t_index)-q9+z_spar(i)*q11));
     dtau_pitch = dfsurge*z_spar(i);
     dtau_roll = -dfsway*z_spar(i);
     F_surge = F_surge + dfsurge;

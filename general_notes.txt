@@ -1,0 +1,7 @@
+6 dof model
+then apply PI controller
+basic control theory
+windcrete spar floater
+model mooring lines analytically, then linearize to get K
+- can eventually explore changing the mooring lines to change natural frequencies
+- papers/book with math for linearized stiffness matrix for mooring lines
